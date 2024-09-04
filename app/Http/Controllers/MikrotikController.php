@@ -88,11 +88,15 @@ class MikrotikController extends Controller
 
         $response = $client->query($query)->read();
 
+        // Dispatch job untuk menghapus user setelah 30 menit
+        \App\Jobs\RemoveUserJob::dispatch($username)->delay(now()->addMinutes(30));
+
         return response()->json($response);
     } catch (\Exception $e) {
         return response()->json(['error' => $e->getMessage()], 500);
     }
 }
+
 
 
     public function getUsers()
