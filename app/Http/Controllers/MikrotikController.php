@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use Carbon\Carbon;
 use RouterOS\Client;
 use RouterOS\Query;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class MikrotikController extends Controller
 {
@@ -72,8 +74,11 @@ class MikrotikController extends Controller
     $username = $no_hp;
     $password = $no_hp;
 
-    // Hitung waktu kedaluwarsa (30 menit dari sekarang)
-    $expiryDate = now()->addMinutes(30)->format('Y/m/d H:i:s');
+    // Set waktu mulai koneksi
+    $startTime = now();
+
+    // Hitung waktu kedaluwarsa (30 menit dari waktu mulai koneksi)
+    $expiryDate = $startTime->copy()->addMinutes(30)->format('Y/m/d H:i:s');
 
     try {
         $client = $this->getClient();
@@ -88,14 +93,23 @@ class MikrotikController extends Controller
 
         $response = $client->query($query)->read();
 
+        // Simpan informasi ke database (opsional, jika ingin menyimpan waktu koneksi)
+        DB::table('users')->insert([
+            'no_hp' => $no_hp,
+            'name' => $name,
+            'start_time' => $startTime,             // Waktu mulai koneksi
+            'expiry_time' => $expiryDate,           // Waktu kedaluwarsa
+        ]);
+
         // Dispatch job untuk menghapus user setelah 30 menit
-        \App\Jobs\RemoveUserJob::dispatch($username)->delay(now()->addMinutes(30));
+        \App\Jobs\RemoveUserJob::dispatch($username)->delay($startTime->addMinutes(30));
 
         return response()->json($response);
     } catch (\Exception $e) {
         return response()->json(['error' => $e->getMessage()], 500);
     }
 }
+
 
 
 
@@ -136,5 +150,53 @@ public function deleteUser(Request $request)
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
+
+    public function extendUserTime(Request $request)
+{
+    $request->validate([
+        'username' => 'required|string|max:20',
+        'additional_minutes' => 'required|integer|min:1',
+    ]);
+
+    $username = $request->input('username');
+    $additional_minutes = $request->input('additional_minutes');
+
+    try {
+        $client = $this->getClient();
+
+        // Cari pengguna berdasarkan username
+        $query = (new Query('/ppp/secret/print'))
+                    ->where('name', $username);
+        $user = $client->query($query)->read();
+
+        if (empty($user)) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+
+        // Ambil informasi komentar yang ada
+        $comment = $user[0]['comment'];
+
+        // Parsing waktu kadaluarsa dari komentar
+        $parts = explode(', ', $comment);
+        $expiryTime = Carbon::parse(substr($parts[1], strlen('Expiry: ')));
+
+        // Hitung waktu baru kedaluwarsa
+        $newExpiryTime = $expiryTime->addMinutes($additional_minutes)->format('Y/m/d H:i:s');
+
+        // Update komentar dengan waktu kedaluwarsa yang baru
+        $newComment = "Start: {$parts[0]}, Expiry: $newExpiryTime";
+
+        $updateQuery = (new Query('/ppp/secret/set'))
+                        ->equal('name', $username)
+                        ->equal('comment', $newComment);
+
+        $client->query($updateQuery)->read();
+
+        return response()->json(['message' => 'User time extended successfully']);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+}
+
 
 }
