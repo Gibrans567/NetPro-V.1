@@ -111,10 +111,6 @@ class MikrotikController extends Controller
     }
 
 
-
-
-
-
     public function getUsers()
 {
     try {
