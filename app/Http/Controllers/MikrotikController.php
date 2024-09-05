@@ -74,41 +74,44 @@ class MikrotikController extends Controller
     $username = $no_hp;
     $password = $no_hp;
 
-    // Set waktu mulai koneksi
-    $startTime = now();
-
-    // Hitung waktu kedaluwarsa (30 menit dari waktu mulai koneksi)
-    $expiryDate = $startTime->copy()->addMinutes(30)->format('Y/m/d H:i:s');
+    // Hitung waktu kedaluwarsa (30 menit dari sekarang)
+    $expiryTime = now()->addMinutes(30)->format('Y/m/d H:i:s');
 
     try {
         $client = $this->getClient();
 
-        // Query untuk menambahkan user dengan waktu kedaluwarsa
+        // Query untuk menambahkan user
         $query = (new Query('/ppp/secret/add'))
-                    ->equal('name', $username)       // Username di MikroTik
-                    ->equal('password', $password)   // Password di MikroTik
-                    ->equal('service', 'pppoe')      // Tipe layanan, bisa disesuaikan
-                    ->equal('comment', $name)        // Menambahkan nama sebagai komentar
-                    ->equal('validity', $expiryDate); // Set waktu kedaluwarsa
+            ->equal('name', $username) // Username di MikroTik
+            ->equal('password', $password) // Password di MikroTik
+            ->equal('service', 'pppoe') // Tipe layanan, bisa disesuaikan
+            ->equal('comment', $name) // Menambahkan nama sebagai komentar
+            ->equal('validity', $expiryTime); // Set waktu kedaluwarsa
 
         $response = $client->query($query)->read();
 
-        // Simpan informasi ke database (opsional, jika ingin menyimpan waktu koneksi)
-        DB::table('users')->insert([
-            'no_hp' => $no_hp,
-            'name' => $name,
-            'start_time' => $startTime,             // Waktu mulai koneksi
-            'expiry_time' => $expiryDate,           // Waktu kedaluwarsa
-        ]);
+        // Tambahkan konfigurasi wireless
+        $query = (new Query('/interface/wireless/security-profiles/add'))
+            ->equal('name', 'profile_' . $username) // Nama profil keamanan
+            ->equal('mode', 'wpa2-psk') // Mode keamanan
+            ->equal('password', $password); // Password
 
-        // Dispatch job untuk menghapus user setelah 30 menit
-        \App\Jobs\RemoveUserJob::dispatch($username)->delay($startTime->addMinutes(30));
+        $client->query($query)->read();
+
+        $query = (new Query('/interface/wireless/set'))
+            ->equal('.id', 'wireless1') // Ganti 'wireless1' dengan nama interface wireless Anda
+            ->equal('mode', 'station')
+            ->equal('ssid', 'MyWiFi') // Ganti 'MyWiFi' dengan SSID yang diinginkan
+            ->equal('security-profile', 'profile_' . $username);
+
+        $client->query($query)->read();
 
         return response()->json($response);
     } catch (\Exception $e) {
         return response()->json(['error' => $e->getMessage()], 500);
     }
 }
+
 
 
 
