@@ -108,6 +108,55 @@ class MikrotikController extends Controller
     }
 }
 
+public function addHotspotUser(Request $request)
+{
+    // Validasi input
+    $request->validate([
+        'no_hp' => 'required|string|max:20',
+        'name' => 'required|string|max:255',
+    ]);
+
+    // Ambil data dari request
+    $no_hp = $request->input('no_hp');
+    $name = $request->input('name');
+
+    // Gunakan no_hp sebagai username dan password
+    $username = $no_hp;
+    $password = $no_hp;
+
+    // Atur waktu kadaluarsa (2 menit dari sekarang)
+    $expiry_time = Carbon::now()->addMinutes(2)->format('Y/m/d H:i:s');
+
+    try {
+        $client = $this->getClient();
+
+        // Query untuk memeriksa apakah user dengan username yang sama sudah ada
+        $checkQuery = (new Query('/ip/hotspot/user/print'))
+            ->where('name', $username); // Cari berdasarkan username
+
+        $existingUsers = $client->query($checkQuery)->read();
+
+        // Jika user sudah ada, kembalikan pesan bahwa user sudah terdaftar
+        if (!empty($existingUsers)) {
+            return response()->json(['message' => 'User already exists']);
+        }
+
+        // Jika user belum ada, tambahkan user baru
+        $query = (new Query('/ip/hotspot/user/add'))
+            ->equal('name', $username) // Username di MikroTik
+            ->equal('password', $password) // Password di MikroTik
+            ->equal('profile', 'default') // Profil pengguna hotspot
+            ->equal('comment', "Name: {$name}, Expiry: {$expiry_time}"); // Tambahkan waktu kedaluwarsa ke komentar
+
+        $response = $client->query($query)->read();
+
+        return response()->json(['message' => 'User added successfully with expiry time of 2 minutes']);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+}
+
+
     public function getUsers()
 {
     try {
@@ -122,6 +171,22 @@ class MikrotikController extends Controller
         return response()->json(['error' => $e->getMessage()], 500);
     }
 }
+
+public function getHotspotUsers()
+{
+    try {
+        $client = $this->getClient();
+
+        // Query untuk mendapatkan daftar pengguna hotspot
+        $query = new Query('/ip/hotspot/user/print');
+        $users = $client->query($query)->read();
+
+        return response()->json(['users' => $users]);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+}
+
 
 public function deleteExpiredUsers()
 {
@@ -173,6 +238,58 @@ public function deleteExpiredUsers()
         return response()->json(['message' => 'Another user operation is in progress'], 429);
     }
 }
+
+public function deleteExpiredHotspotUsers()
+{
+    // Lock untuk mencegah race condition antara proses delete dan extend
+    if (Cache::lock('mikrotik_hotspot_user_operation', 10)->get()) {
+        try {
+            $client = $this->getClient();
+
+            // Query untuk mendapatkan daftar pengguna hotspot
+            $query = new Query('/ip/hotspot/user/print');
+            $users = $client->query($query)->read();
+
+            foreach ($users as $user) {
+                // Ambil informasi waktu kadaluwarsa dari komentar
+                if (isset($user['comment']) && strpos($user['comment'], 'Expiry:') !== false) {
+                    $parts = explode(', ', $user['comment']);
+
+                    // Ambil status jika ada
+                    $isExtending = strpos($parts[0], 'Status: extending') !== false;
+
+                    // Pastikan array parts memiliki setidaknya dua elemen untuk menghindari error
+                    if (isset($parts[1]) && strpos($parts[1], 'Expiry: ') === 0) {
+                        $expiryTime = Carbon::parse(substr($parts[1], strlen('Expiry: ')));
+
+                        // Jika waktu kadaluwarsa telah tercapai, hapus pengguna meskipun sedang extending
+                        if (Carbon::now()->greaterThanOrEqualTo($expiryTime)) {
+                            Log::info("Deleting hotspot user {$user['.id']} with status extending due to expiry time: $expiryTime");
+
+                            // Hapus pengguna jika waktu telah habis
+                            $deleteQuery = (new Query('/ip/hotspot/user/remove'))
+                                ->equal('.id', $user['.id']);
+                            $client->query($deleteQuery)->read();
+                        } else {
+                            Log::info("Hotspot user {$user['.id']} is not expired yet. Expiry time: $expiryTime");
+                        }
+                    }
+                }
+            }
+
+            return response()->json(['message' => 'Expired hotspot users deleted successfully']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        } finally {
+            // Release lock after operation
+            Cache::lock('mikrotik_hotspot_user_operation')->release();
+        }
+    } else {
+        Log::warning('Another hotspot user operation is in progress, skipping this run.');
+        return response()->json(['message' => 'Another hotspot user operation is in progress'], 429);
+    }
+}
+
 
 
 
