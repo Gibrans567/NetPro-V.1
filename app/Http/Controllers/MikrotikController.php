@@ -75,7 +75,7 @@ class MikrotikController extends Controller
     $password = $no_hp;
 
     // Atur waktu kadaluarsa (30 menit dari sekarang)
-    $expiry_time = Carbon::now()->addMinutes(1)->format('Y/m/d H:i:s');
+    $expiry_time = Carbon::now()->addMinutes(2)->format('Y/m/d H:i:s');
 
     try {
         $client = $this->getClient();
@@ -134,17 +134,20 @@ public function deleteExpiredUsers()
             // Ambil informasi waktu kadaluwarsa dari komentar
             if (isset($user['comment']) && strpos($user['comment'], 'Expiry:') !== false) {
                 $parts = explode(', ', $user['comment']);
-                $expiryTime = Carbon::parse(substr($parts[1], strlen('Expiry: ')));
 
-                // Jika waktu kadaluwarsa telah lewat, hapus pengguna
-                if (Carbon::now()->greaterThanOrEqualTo($expiryTime)) {
-                    $deleteQuery = (new Query('/ppp/secret/remove'))
-                        ->equal('.id', $user['.id']);
-                    $client->query($deleteQuery)->read();
+                // Pastikan array parts memiliki setidaknya dua elemen untuk menghindari error
+                if (isset($parts[1]) && strpos($parts[1], 'Expiry: ') === 0) {
+                    $expiryTime = Carbon::parse(substr($parts[1], strlen('Expiry: ')));
+
+                    // Lanjutkan jika format tanggal valid
+                    if (Carbon::now()->greaterThanOrEqualTo($expiryTime)) {
+                        $deleteQuery = (new Query('/ppp/secret/remove'))
+                            ->equal('.id', $user['.id']);
+                        $client->query($deleteQuery)->read();
+                    }
                 }
             }
         }
-
         return response()->json(['message' => 'Expired users deleted successfully']);
     } catch (\Exception $e) {
         return response()->json(['error' => $e->getMessage()], 500);
@@ -153,22 +156,22 @@ public function deleteExpiredUsers()
 
 
 
-    public function extendUserTime(Request $request)
+public function extendUserTime(Request $request)
 {
     $request->validate([
-        'username' => 'required|string|max:20',
+        'id' => 'required|string', // validasi menggunakan id
         'additional_minutes' => 'required|integer|min:1',
     ]);
 
-    $username = $request->input('username');
+    $id = $request->input('id');
     $additional_minutes = $request->input('additional_minutes');
 
     try {
         $client = $this->getClient();
 
-        // Cari pengguna berdasarkan username
+        // Cari pengguna berdasarkan ID
         $query = (new Query('/ppp/secret/print'))
-                    ->where('name', $username);
+                    ->where('.id', $id); // menggunakan id dalam query
         $user = $client->query($query)->read();
 
         if (empty($user)) {
@@ -185,11 +188,12 @@ public function deleteExpiredUsers()
         // Hitung waktu baru kedaluwarsa
         $newExpiryTime = $expiryTime->addMinutes($additional_minutes)->format('Y/m/d H:i:s');
 
+
         // Update komentar dengan waktu kedaluwarsa yang baru
-        $newComment = "Start: {$parts[0]}, Expiry: $newExpiryTime";
+        $newComment = "{$parts[0]}, Expiry: $newExpiryTime";
 
         $updateQuery = (new Query('/ppp/secret/set'))
-                        ->equal('name', $username)
+                        ->equal('.id', $id) // update menggunakan id
                         ->equal('comment', $newComment);
 
         $client->query($updateQuery)->read();
@@ -199,6 +203,7 @@ public function deleteExpiredUsers()
         return response()->json(['error' => $e->getMessage()], 500);
     }
 }
+
 
 
 }

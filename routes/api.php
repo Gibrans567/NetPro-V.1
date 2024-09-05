@@ -19,5 +19,6 @@ Route::delete('/mikrotik/delete/{id}', [MikrotikController::class, 'deleteUser']
 // routes/api.php
 Route::post('/login', [AuthController::class, 'login']);
 Route::delete('/mikrotik/deleteExpiredUsers', [MikrotikController::class, 'deleteExpiredUsers']);
+Route::post('/mikrotik/extend-time', [MikrotikController::class, 'extendUserTime']);
 
 
