@@ -11,4 +11,4 @@ Artisan::command('inspire', function () {
 Schedule::call(function () {
     $controller = new \App\Http\Controllers\MikrotikController();
     $controller->deleteExpiredUsers();
-})->everyFiveMinutes();
+})->everyMinute();
