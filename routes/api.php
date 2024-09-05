@@ -10,7 +10,6 @@ Route::get('/user', function (Request $request) {
 })->middleware('auth:sanctum');
 
 Route::get('/mikrotik/connect', [MikrotikController::class, 'connectToMikrotik']);
-Route::post('/mikrotik/add-ip', [MikrotikController::class, 'addIpAddress']);
 Route::get('/mikrotik/check-connection', [MikrotikController::class, 'checkConnection']);
 Route::post('/mikrotik/add-user', [MikrotikController::class, 'addUser']);
 Route::post('/mikrotik/add-Hotspot-User', [MikrotikController::class, 'addHotspotUser']);
@@ -22,5 +21,5 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::delete('/mikrotik/deleteExpiredUsers', [MikrotikController::class, 'deleteExpiredUsers']);
 Route::delete('/mikrotik/deleteExpiredHotspotUsers', [MikrotikController::class, 'deleteExpiredHotspotUsers']);
 Route::put('/mikrotik/extend-time', [MikrotikController::class, 'extendUserTime']);
-
+Route::put('/mikrotik/extend-time', [MikrotikController::class, 'extendHotspotUserTime']);
 

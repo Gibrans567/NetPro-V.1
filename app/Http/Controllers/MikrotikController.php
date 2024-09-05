@@ -36,20 +36,6 @@ class MikrotikController extends Controller
         }
     }
 
-    public function addIpAddress(Request $request)
-    {
-        try {
-            $client = $this->getClient();
-            $query = (new Query('/ip/address/add'))
-                        ->equal('address', $request->input('address'))
-                        ->equal('interface', $request->input('interface'));
-            $response = $client->query($query)->read();
-            return response()->json($response);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
-        }
-    }
-
     public function checkConnection()
     {
         try {
@@ -291,10 +277,6 @@ public function deleteExpiredHotspotUsers()
 }
 
 
-
-
-
-
 public function extendUserTime(Request $request)
 {
     // Validasi input
@@ -361,6 +343,71 @@ public function extendUserTime(Request $request)
     }
 }
 
+public function extendHotspotUserTime(Request $request)
+{
+    // Validasi input
+    $request->validate([
+        'id' => 'required|string', // validasi menggunakan id
+        'additional_minutes' => 'required|integer|min:1', // menit tambahan harus integer dan minimal 1
+    ]);
+
+    $id = $request->input('id');
+    $additional_minutes = $request->input('additional_minutes');
+
+    try {
+        $client = $this->getClient();
+
+        // Cari pengguna hotspot berdasarkan ID
+        $query = (new Query('/ip/hotspot/user/print'))->where('.id', $id);
+        $user = $client->query($query)->read();
+
+        if (empty($user)) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+
+        // Ambil informasi komentar yang ada
+        $comment = $user[0]['comment'] ?? '';
+
+        // Parsing waktu kadaluarsa dari komentar
+        $expiryTime = null;
+        if (strpos($comment, 'Expiry:') !== false) {
+            $parts = explode(', ', $comment);
+            foreach ($parts as $part) {
+                if (strpos($part, 'Expiry:') === 0) {
+                    $expiryTime = Carbon::parse(trim(substr($part, strlen('Expiry: '))));
+                    break;
+                }
+            }
+
+            // Jika waktu kadaluarsa ada dan belum habis, tambahkan ke waktu tersebut
+            if ($expiryTime && $expiryTime->greaterThan(Carbon::now())) {
+                $newExpiryTime = $expiryTime->addMinutes($additional_minutes)->format('Y-m-d H:i:s');
+            } else {
+                // Jika waktu kadaluarsa sudah lewat, mulai dari waktu sekarang
+                $newExpiryTime = Carbon::now()->addMinutes($additional_minutes)->format('Y-m-d H:i:s');
+            }
+        } else {
+            // Jika tidak ada waktu kadaluarsa, mulai dari waktu sekarang
+            $newExpiryTime = Carbon::now()->addMinutes($additional_minutes)->format('Y-m-d H:i:s');
+        }
+
+        // Update komentar dengan waktu kadaluarsa yang baru
+        $newComment = strpos($comment, 'Expiry:') !== false
+            ? preg_replace('/Expiry: .*/', "Expiry: $newExpiryTime", $comment)
+            : ($comment ? "$comment, Expiry: $newExpiryTime" : "Expiry: $newExpiryTime");
+
+        $updateQuery = (new Query('/ip/hotspot/user/set'))
+            ->equal('.id', $id)
+            ->equal('comment', $newComment);
+
+        Log::info("Updating hotspot user $id with new expiry time: $newExpiryTime");
+        $client->query($updateQuery)->read();
+
+        return response()->json(['message' => 'User time extended successfully']);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+}
 
 
 
