@@ -59,57 +59,41 @@ class MikrotikController extends Controller
     }
 
     public function addUser(Request $request)
-    {
-        // Validasi input
-        $request->validate([
-            'no_hp' => 'required|string|max:20',
-            'name' => 'required|string|max:255',
-        ]);
+{
+    // Validasi input
+    $request->validate([
+        'no_hp' => 'required|string|max:20',
+        'name' => 'required|string|max:255',
+    ]);
 
-        // Ambil data dari request
-        $no_hp = $request->input('no_hp');
-        $name = $request->input('name');
+    // Ambil data dari request
+    $no_hp = $request->input('no_hp');
+    $name = $request->input('name');
 
-        // Gunakan no_hp sebagai username dan password
-        $username = $no_hp;
-        $password = $no_hp;
+    // Gunakan no_hp sebagai username dan password
+    $username = $no_hp;
+    $password = $no_hp;
 
-        try {
-            $client = $this->getClient();
+    // Atur waktu kadaluarsa (30 menit dari sekarang)
+    $expiry_time = Carbon::now()->addMinutes(30)->format('Y/m/d H:i:s');
 
-            // Query untuk menambahkan user PPPoE
-            $query = (new Query('/ppp/secret/add'))
-                ->equal('name', $username) // Username di MikroTik
-                ->equal('password', $password) // Password di MikroTik
-                ->equal('service', 'pppoe') // Tipe layanan, bisa disesuaikan
-                ->equal('comment', $name); // Menambahkan nama sebagai komentar
+    try {
+        $client = $this->getClient();
 
-            $response = $client->query($query)->read();
+        // Query untuk menambahkan user PPPoE
+        $query = (new Query('/ppp/secret/add'))
+            ->equal('name', $username) // Username di MikroTik
+            ->equal('password', $password) // Password di MikroTik
+            ->equal('service', 'pppoe') // Tipe layanan, bisa disesuaikan
+            ->equal('comment', "Name: {$name}, Expiry: {$expiry_time}"); // Tambahkan waktu kedaluwarsa ke komentar
 
-            // Set profil keamanan wireless jika diperlukan (biasanya hanya diset satu kali)
-            // Ganti ini sesuai kebutuhan konfigurasi wireless Anda
-            $query = (new Query('/interface/wireless/security-profiles/set'))
-                ->equal('.id', 'default') // Menggunakan profil keamanan default
-                ->equal('mode', 'dynamic-keys') // Menggunakan dynamic keys (WPA2)
-                ->equal('authentication-types', 'wpa2-psk') // Mode WPA2-PSK
-                ->equal('wpa2-pre-shared-key', 'MySecretPassword'); // Ganti ini dengan password WiFi yang diinginkan
+        $response = $client->query($query)->read();
 
-            $client->query($query)->read();
-
-            // Set wireless interface (ini hanya jika Anda ingin mengubah SSID atau interface lain)
-            $query = (new Query('/interface/wireless/set'))
-                ->equal('.id', 'wlan1') // Ganti 'wlan1' dengan nama interface wireless Anda
-                ->equal('ssid', 'MyWiFi') // Ganti 'MyWiFi' dengan SSID yang diinginkan
-                ->equal('security-profile', 'default'); // Gunakan profil keamanan default
-
-            $client->query($query)->read();
-
-            return response()->json(['message' => 'User and wireless settings updated successfully']);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
-        }
+        return response()->json(['message' => 'User added successfully with expiry time of 30 minutes']);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
     }
-
+}
 
     public function getUsers()
 {
@@ -126,23 +110,36 @@ class MikrotikController extends Controller
     }
 }
 
-public function deleteUser($id)
+public function deleteExpiredUsers()
 {
     try {
-        $client = $this->getClient(); // Inisialisasi koneksi ke MikroTik
+        $client = $this->getClient();
 
-        // Query untuk menghapus user berdasarkan ID
-        $query = (new Query('/ppp/secret/remove'))
-             ->equal('.id', $id);  // Pastikan $id adalah .id asli dari MikroTik, seperti "*1"
+        // Query untuk mendapatkan daftar pengguna PPP
+        $query = new Query('/ppp/secret/print');
+        $users = $client->query($query)->read();
 
+        foreach ($users as $user) {
+            // Ambil informasi waktu kadaluwarsa dari komentar
+            if (isset($user['comment']) && strpos($user['comment'], 'Expiry:') !== false) {
+                $parts = explode(', ', $user['comment']);
+                $expiryTime = Carbon::parse(substr($parts[1], strlen('Expiry: ')));
 
-        $response = $client->query($query)->read();
+                // Jika waktu kadaluwarsa telah lewat, hapus pengguna
+                if (Carbon::now()->greaterThanOrEqualTo($expiryTime)) {
+                    $deleteQuery = (new Query('/ppp/secret/remove'))
+                        ->equal('.id', $user['.id']);
+                    $client->query($deleteQuery)->read();
+                }
+            }
+        }
 
-        return response()->json(['message' => 'User deleted successfully', 'id' => $id], 200);
+        return response()->json(['message' => 'Expired users deleted successfully']);
     } catch (\Exception $e) {
         return response()->json(['error' => $e->getMessage()], 500);
     }
 }
+
 
 
     public function extendUserTime(Request $request)
