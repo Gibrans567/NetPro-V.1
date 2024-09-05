@@ -75,12 +75,23 @@ class MikrotikController extends Controller
     $password = $no_hp;
 
     // Atur waktu kadaluarsa (30 menit dari sekarang)
-    $expiry_time = Carbon::now()->addMinutes(30)->format('Y/m/d H:i:s');
+    $expiry_time = Carbon::now()->addMinutes(1)->format('Y/m/d H:i:s');
 
     try {
         $client = $this->getClient();
 
-        // Query untuk menambahkan user PPPoE
+        // Query untuk memeriksa apakah user dengan username yang sama sudah ada
+        $checkQuery = (new Query('/ppp/secret/print'))
+            ->where('name', $username); // Cari berdasarkan username
+
+        $existingUsers = $client->query($checkQuery)->read();
+
+        // Jika user sudah ada, kembalikan pesan bahwa user sudah terdaftar
+        if (!empty($existingUsers)) {
+            return response()->json(['message' => 'User already exists']);
+        }
+
+        // Jika user belum ada, tambahkan user baru
         $query = (new Query('/ppp/secret/add'))
             ->equal('name', $username) // Username di MikroTik
             ->equal('password', $password) // Password di MikroTik

@@ -18,6 +18,6 @@ Route::delete('/mikrotik/delete/{id}', [MikrotikController::class, 'deleteUser']
     ->where('id', '[\*a-zA-Z0-9]+');
 // routes/api.php
 Route::post('/login', [AuthController::class, 'login']);
-
+Route::delete('/mikrotik/deleteExpiredUsers', [MikrotikController::class, 'deleteExpiredUsers']);
 
 
