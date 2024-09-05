@@ -21,5 +21,5 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::delete('/mikrotik/deleteExpiredUsers', [MikrotikController::class, 'deleteExpiredUsers']);
 Route::delete('/mikrotik/deleteExpiredHotspotUsers', [MikrotikController::class, 'deleteExpiredHotspotUsers']);
 Route::put('/mikrotik/extend-time', [MikrotikController::class, 'extendUserTime']);
-Route::put('/mikrotik/extend-time', [MikrotikController::class, 'extendHotspotUserTime']);
+Route::put('/mikrotik/extend-Hotspot', [MikrotikController::class, 'extendHotspotUserTime']);
 

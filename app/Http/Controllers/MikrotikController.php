@@ -111,7 +111,7 @@ public function addHotspotUser(Request $request)
     $password = $no_hp;
 
     // Atur waktu kadaluarsa (2 menit dari sekarang)
-    $expiry_time = Carbon::now()->addMinutes(2)->format('Y/m/d H:i:s');
+    $expiry_time = Carbon::now()->addMinutes(1)->format('Y/m/d H:i:s');
 
     try {
         $client = $this->getClient();
@@ -136,7 +136,7 @@ public function addHotspotUser(Request $request)
 
         $response = $client->query($query)->read();
 
-        return response()->json(['message' => 'User added successfully with expiry time of 2 minutes']);
+        return response()->json(['message' => 'User added successfully with expiry time of ',$expiry_time,'minutes']);
     } catch (\Exception $e) {
         return response()->json(['error' => $e->getMessage()], 500);
     }
