@@ -14,5 +14,7 @@ Route::post('/mikrotik/add-ip', [MikrotikController::class, 'addIpAddress']);
 Route::get('/mikrotik/check-connection', [MikrotikController::class, 'checkConnection']);
 Route::post('/mikrotik/add-user', [MikrotikController::class, 'addUser']);
 Route::get('/mikrotik/get-users', [MikrotikController::class, 'getUsers']);
-Route::delete('/mikrotik/delete/{*+id}', [MikrotikController::class, 'deleteUser']);
+Route::delete('/mikrotik/delete/{id}', [MikrotikController::class, 'deleteUser'])
+    ->where('id', '[\*a-zA-Z0-9]+');
+
 

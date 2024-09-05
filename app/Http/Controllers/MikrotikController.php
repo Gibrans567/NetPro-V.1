@@ -59,58 +59,57 @@ class MikrotikController extends Controller
     }
 
     public function addUser(Request $request)
-{
-    // Validasi input
-    $request->validate([
-        'no_hp' => 'required|string|max:20',
-        'name' => 'required|string|max:255',
-    ]);
+    {
+        // Validasi input
+        $request->validate([
+            'no_hp' => 'required|string|max:20',
+            'name' => 'required|string|max:255',
+        ]);
 
-    // Ambil data dari request
-    $no_hp = $request->input('no_hp');
-    $name = $request->input('name');
+        // Ambil data dari request
+        $no_hp = $request->input('no_hp');
+        $name = $request->input('name');
 
-    // Gunakan no_hp sebagai username dan password
-    $username = $no_hp;
-    $password = $no_hp;
+        // Gunakan no_hp sebagai username dan password
+        $username = $no_hp;
+        $password = $no_hp;
 
-    // Hitung waktu kedaluwarsa (30 menit dari sekarang)
-    $expiryTime = now()->addMinutes(30)->format('Y/m/d H:i:s');
+        try {
+            $client = $this->getClient();
 
-    try {
-        $client = $this->getClient();
+            // Query untuk menambahkan user PPPoE
+            $query = (new Query('/ppp/secret/add'))
+                ->equal('name', $username) // Username di MikroTik
+                ->equal('password', $password) // Password di MikroTik
+                ->equal('service', 'pppoe') // Tipe layanan, bisa disesuaikan
+                ->equal('comment', $name); // Menambahkan nama sebagai komentar
 
-        // Query untuk menambahkan user
-        $query = (new Query('/ppp/secret/add'))
-            ->equal('name', $username) // Username di MikroTik
-            ->equal('password', $password) // Password di MikroTik
-            ->equal('service', 'pppoe') // Tipe layanan, bisa disesuaikan
-            ->equal('comment', $name) // Menambahkan nama sebagai komentar
-            ->equal('validity', $expiryTime); // Set waktu kedaluwarsa
+            $response = $client->query($query)->read();
 
-        $response = $client->query($query)->read();
+            // Set profil keamanan wireless jika diperlukan (biasanya hanya diset satu kali)
+            // Ganti ini sesuai kebutuhan konfigurasi wireless Anda
+            $query = (new Query('/interface/wireless/security-profiles/set'))
+                ->equal('.id', 'default') // Menggunakan profil keamanan default
+                ->equal('mode', 'dynamic-keys') // Menggunakan dynamic keys (WPA2)
+                ->equal('authentication-types', 'wpa2-psk') // Mode WPA2-PSK
+                ->equal('wpa2-pre-shared-key', 'MySecretPassword'); // Ganti ini dengan password WiFi yang diinginkan
 
-        // Tambahkan konfigurasi wireless
-        $query = (new Query('/interface/wireless/security-profiles/add'))
-            ->equal('name', 'profile_' . $username) // Nama profil keamanan
-            ->equal('mode', 'wpa2-psk') // Mode keamanan
-            ->equal('password', $password); // Password
+            $client->query($query)->read();
 
-        $client->query($query)->read();
+            // Set wireless interface (ini hanya jika Anda ingin mengubah SSID atau interface lain)
+            $query = (new Query('/interface/wireless/set'))
+                ->equal('.id', 'wlan1') // Ganti 'wlan1' dengan nama interface wireless Anda
+                ->equal('ssid', 'MyWiFi') // Ganti 'MyWiFi' dengan SSID yang diinginkan
+                ->equal('security-profile', 'default'); // Gunakan profil keamanan default
 
-        $query = (new Query('/interface/wireless/set'))
-            ->equal('.id', 'wireless1') // Ganti 'wireless1' dengan nama interface wireless Anda
-            ->equal('mode', 'station')
-            ->equal('ssid', 'MyWiFi') // Ganti 'MyWiFi' dengan SSID yang diinginkan
-            ->equal('security-profile', 'profile_' . $username);
+            $client->query($query)->read();
 
-        $client->query($query)->read();
-
-        return response()->json($response);
-    } catch (\Exception $e) {
-        return response()->json(['error' => $e->getMessage()], 500);
+            return response()->json(['message' => 'User and wireless settings updated successfully']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
-}
+
 
 
 
@@ -131,28 +130,24 @@ class MikrotikController extends Controller
     }
 }
 
-public function deleteUser(Request $request)
-    {
-        // Validasi input
-        $request->validate([
-            'id' => 'required|string',
-        ]);
+public function deleteUser($id)
+{
+    try {
+        $client = $this->getClient(); // Inisialisasi koneksi ke MikroTik
 
-        $userId = $request->input('id');
+        // Query untuk menghapus user berdasarkan ID
+        $query = (new Query('/ppp/secret/remove'))
+             ->equal('.id', $id);  // Pastikan $id adalah .id asli dari MikroTik, seperti "*1"
 
-        try {
-            $client = $this->getClient();
 
-            // Query untuk menghapus user berdasarkan ID
-            $deleteQuery = (new Query('/ppp/secret/remove'))
-                            ->equal('.id', $userId);
-            $response = $client->query($deleteQuery)->read();
+        $response = $client->query($query)->read();
 
-            return response()->json(['message' => 'User deleted successfully']);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
-        }
+        return response()->json(['message' => 'User deleted successfully', 'id' => $id], 200);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
     }
+}
+
 
     public function extendUserTime(Request $request)
 {
