@@ -22,5 +22,6 @@ Route::delete('/mikrotik/deleteExpiredUsers', [MikrotikController::class, 'delet
 Route::delete('/mikrotik/deleteExpiredHotspotUsers', [MikrotikController::class, 'deleteExpiredHotspotUsers']);
 Route::put('/mikrotik/extend-time', [MikrotikController::class, 'extendUserTime']);
 Route::put('/mikrotik/extend-Hotspot', [MikrotikController::class, 'extendHotspotUserTime']);
+Route::post('/mikrotik/login-hotspot-user', [MikrotikController::class, 'loginHotspotUser']);
 Route::get('/mikrotik/generate-hotspot-qrcode', [MikrotikController::class, 'generateHotspotQrCode']);
 

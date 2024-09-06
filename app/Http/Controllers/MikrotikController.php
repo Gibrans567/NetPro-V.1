@@ -223,7 +223,6 @@ public function generateHotspotQrCode(Request $request)
 }
 
 
-
     public function getUsers()
 {
     try {
