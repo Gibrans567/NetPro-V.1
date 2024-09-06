@@ -8,10 +8,6 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote')->hourly();
 
-Schedule::call(function () {
-    $controller = new \App\Http\Controllers\MikrotikController();
-    $controller->deleteExpiredUsers();
-})->everyMinute();
 
 Schedule::call(function () {
     $controller = new \App\Http\Controllers\MikrotikController();
