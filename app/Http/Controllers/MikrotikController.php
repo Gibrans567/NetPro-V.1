@@ -2,14 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Menu;
+use App\Models\Order;
 use Carbon\Carbon;
+use Endroid\QrCode\Builder\Builder;
+use Endroid\QrCode\Encoding\Encoding;
+use Endroid\QrCode\Label\Font\NotoSans;
 use RouterOS\Client;
 use RouterOS\Query;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
-use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 class MikrotikController extends Controller
 {
@@ -47,55 +51,76 @@ class MikrotikController extends Controller
         }
     }
 
+    public function addHotspotUser(Request $request)
+    {
+        // Validasi input
+        $request->validate([
+            'no_hp' => 'required|string|max:20',
+            'name' => 'required|string|max:255',
+            'menu_ids' => 'required|array' // ID menu yang dipesan
+        ]);
 
-public function addHotspotUser(Request $request)
-{
-    // Validasi input
-    $request->validate([
-        'no_hp' => 'required|string|max:20',
-        'name' => 'required|string|max:255',
-    ]);
+        $no_hp = $request->input('no_hp');
+        $name = $request->input('name');
+        $menu_ids = $request->input('menu_ids');
 
-    // Ambil data dari request
-    $no_hp = $request->input('no_hp');
-    $name = $request->input('name');
+        // Hitung total harga dan expiry_time dari menu yang dipesan
+        $orderDetails = $this->calculateOrderDetails($menu_ids);
 
-    // Gunakan no_hp sebagai username dan password
-    $username = $no_hp;
-    $password = $no_hp;
-
-    // Atur waktu kadaluwarsa (contoh: 1 hari dari sekarang)
-    $expiry_time = Carbon::now()->addDay()->format('Y/m/d H:i:s');
-
-    try {
-        // Koneksi ke Mikrotik
-        $client = $this->getClient();
-
-        // Query untuk memeriksa apakah user dengan username yang sama sudah ada
-        $checkQuery = (new Query('/ip/hotspot/user/print'))
-            ->where('name', $username);
-
-        $existingUsers = $client->query($checkQuery)->read();
-
-        // Jika user sudah ada, kembalikan pesan bahwa user sudah terdaftar
-        if (!empty($existingUsers)) {
-            return response()->json(['message' => 'User already exists'], 409);
+        if (!$orderDetails || $orderDetails->total_expiry_time === 0) {
+            return response()->json(['message' => 'No valid menu items found.'], 400);
         }
 
-        // Jika user belum ada, tambahkan user baru dengan masa berlaku 1 hari
-        $query = (new Query('/ip/hotspot/user/add'))
-            ->equal('name', $username) // Username di MikroTik
-            ->equal('password', $password) // Password di MikroTik
-            ->equal('profile', 'default') // Profil pengguna hotspot
-            ->equal('comment', "Name: {$name}, Status: inactive, Expiry: {$expiry_time}"); // Status inactive dan waktu kadaluwarsa
+        // Simpan pesanan
+        foreach ($menu_ids as $menu_id) {
+            Order::create([
+                'no_hp' => $no_hp,
+                'menu_id' => $menu_id
+            ]);
+        }
 
-        $response = $client->query($query)->read();
+        // Hitung waktu kadaluarsa berdasarkan total expiry_time
+        $expiry_time = Carbon::now()->addMinutes($orderDetails->total_expiry_time)->format('Y/m/d H:i:s');
 
-        return response()->json(['message' => 'User added successfully with expiry time of 1 day']);
-    } catch (\Exception $e) {
-        return response()->json(['error' => $e->getMessage()], 500);
+        try {
+            $client = $this->getClient();
+
+            // Cek apakah user sudah ada
+            $checkQuery = (new Query('/ip/hotspot/user/print'))
+                ->where('name', $no_hp);
+
+            $existingUsers = $client->query($checkQuery)->read();
+
+            if (!empty($existingUsers)) {
+                return response()->json(['message' => 'User already exists'], 409);
+            }
+
+            // Tambahkan user baru
+            $query = (new Query('/ip/hotspot/user/add'))
+                ->equal('name', $no_hp)
+                ->equal('password', $no_hp)
+                ->equal('profile', 'default')
+                ->equal('comment', "Name: {$name}, Status: inactive, Expiry: {$expiry_time}");
+
+            $client->query($query)->read();
+
+            return response()->json([
+                'message' => 'User added successfully with expiry time of ' . $orderDetails->total_expiry_time . ' minutes',
+                'total_price' => $orderDetails->total_harga
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
-}
+
+    public function calculateOrderDetails($menu_ids)
+    {
+        return Order::whereIn('menu_id', $menu_ids)
+            ->join('menus', 'orders.menu_id', '=', 'menus.id')
+            ->selectRaw('SUM(menus.expiry_time) as total_expiry_time, SUM(menus.price) as total_harga')
+            ->first();
+    }
+
 
 public function loginHotspotUser(Request $request)
 {
@@ -155,46 +180,37 @@ public function loginHotspotUser(Request $request)
 
 
 
-public function generateHotspotQrCode(Request $request)
-{
-    // Validasi input
-    $request->validate([
-        'no_hp' => 'required|string|max:20',
-        'name' => 'required|string|max:255',
-    ]);
-
-    // Ambil data dari request
-    $no_hp = $request->input('no_hp');
-    $name = $request->input('name');
-
-    // Gunakan no_hp sebagai username dan password
-    $username = $no_hp;
-    $password = $no_hp;
-
-    // URL login Mikrotik bisa bervariasi, sesuaikan dengan setup Anda.
-    $loginUrl = url("/hotspot/login?username={$username}&password={$password}");
-
-    // Simpan QR Code sebagai gambar di server (di folder public/qrcodes)
-    $qrCodePath = 'qrcodes/' . $username . '.png';
-
-    // Generate QR Code, simpan di folder public/qrcodes
-    QrCode::format('png')->size(300)->generate($loginUrl, public_path($qrCodePath));
-
-    // Buat URL yang bisa diakses untuk melihat QR Code
-    $qrCodeUrl = url($qrCodePath);
-
-    // Kembalikan URL ke QR Code dalam format JSON, termasuk link untuk login langsung
-    return response()->json([
-        'message' => 'QR Code generated successfully.',
-        'qr_code_url' => $qrCodeUrl, // Link ke QR Code
-        'login_url' => $loginUrl, // Link langsung untuk login
-    ]);
-}
-
-
-
 
 public function getHotspotUsers()
+{
+    try {
+        $client = $this->getClient();
+
+        // Query untuk mendapatkan daftar pengguna hotspot
+        $query = new Query('/ip/hotspot/user/print');
+        $users = $client->query($query)->read();
+
+        // Siapkan array untuk menyimpan user data dalam format string "username:password"
+        $formattedUsers = [];
+
+        foreach ($users as $user) {
+            if (isset($user['name']) && isset($user['password'])) {
+                $formattedUsers[] = [
+                    'id' => $user['.id'],
+                    'username' => $user['name'],
+                    'password' => $user['password'],
+                    'qr_string' => $user['name'] . ':' . $user['password'] // Menggabungkan username dan password
+                ];
+            }
+        }
+
+        return response()->json(['users' => $formattedUsers]);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+}
+
+public function getHotspotUsers1()
 {
     try {
         $client = $this->getClient();
@@ -208,6 +224,8 @@ public function getHotspotUsers()
         return response()->json(['error' => $e->getMessage()], 500);
     }
 }
+
+
 
 
 public function deleteExpiredHotspotUsers()
@@ -327,7 +345,29 @@ public function extendHotspotUserTime(Request $request)
     }
 }
 
+public function createOrder(Request $request)
+{
+    // Validasi input
+    $request->validate([
+        'user_id' => 'required|exists:users,id',
+        'menu_id' => 'required|exists:menus,id',
+    ]);
 
+    // Ambil menu yang dipesan
+    $menu = Menu::find($request->input('menu_id'));
+
+    // Hitung waktu kadaluwarsa berdasarkan waktu sekarang + expiry_duration dari menu
+    $expiry_time = Carbon::now()->addMinutes($menu->expiry_duration);
+
+    // Simpan pesanan
+    $order = new Order();
+    $order->user_id = $request->input('user_id');
+    $order->menu_id = $menu->id;
+    $order->expiry_time = $expiry_time;
+    $order->save();
+
+    return response()->json(['message' => 'Order created successfully', 'expiry_time' => $expiry_time]);
+}
 
 
 
