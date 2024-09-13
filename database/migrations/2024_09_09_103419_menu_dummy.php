@@ -16,6 +16,7 @@ return new class extends Migration
             $table->string('no_hp');
             $table->foreignId('menu_id')->constrained('menus')->onDelete('cascade');
             $table->timestamps();
+            $table->timestamp('expiry_at')->nullable(); 
         });
     }
 

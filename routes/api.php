@@ -13,7 +13,8 @@ Route::get('/mikrotik/connect', [MikrotikController::class, 'connectToMikrotik']
 Route::get('/mikrotik/check-connection', [MikrotikController::class, 'checkConnection']);
 Route::post('/mikrotik/add-Hotspot-User', [MikrotikController::class, 'addHotspotUser']);
 Route::get('/mikrotik/get-Hotspot-users', [MikrotikController::class, 'getHotspotUsers']);
-Route::post('/login', [AuthController::class, 'login']);
+Route::get('/mikrotik/get-Hotspot-users1', [MikrotikController::class, 'getHotspotUsers1']);
+Route::put('/login', [AuthController::class, 'login']);
 Route::delete('/mikrotik/deleteExpiredHotspotUsers', [MikrotikController::class, 'deleteExpiredHotspotUsers']);
 Route::put('/mikrotik/extend-Hotspot', [MikrotikController::class, 'extendHotspotUserTime']);
 Route::put('/mikrotik/login-hotspot-user', [MikrotikController::class, 'loginHotspotUser']);
