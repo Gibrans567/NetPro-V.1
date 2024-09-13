@@ -60,21 +60,35 @@ class MikrotikController extends Controller
         $name = $request->input('name');
         $menu_ids = $request->input('menu_ids');
 
-        // Simpan pesanan
+        // Cek order lama yang sudah kadaluarsa berdasarkan no_hp
+        $now = Carbon::now();
+        $expiredOrders = Order::where('no_hp', $no_hp)
+            ->where('expiry_at', '<', $now) // Order yang sudah kadaluarsa
+            ->get();
+
+        // Hapus semua order yang sudah kadaluarsa
+        foreach ($expiredOrders as $expiredOrder) {
+            $expiredOrder->delete();
+        }
+
+         // Set expiry_time untuk database (2 menit)
+        $db_expiry_time = Carbon::now()->addMinutes(2)->format('Y-m-d H:i:s');
+
+        // Simpan pesanan baru dan hitung waktu expiry baru
+        $expiry_time = Carbon::now()->addMinutes(1)->format('Y/m/d H:i:s'); // Waktu expiry tetap 6 jam
+
         foreach ($menu_ids as $menu_id) {
             Order::create([
                 'no_hp' => $no_hp,
-                'menu_id' => $menu_id
+                'menu_id' => $menu_id,
+                'expiry_at' => $db_expiry_time // Set waktu kadaluarsa untuk order baru
             ]);
         }
-
-        // Waktu kadaluarsa tetap selama 6 jam (360 menit) dari sekarang
-        $expiry_time = Carbon::now()->addMinutes(360)->format('Y/m/d H:i:s');
 
         try {
             $client = $this->getClient();
 
-            // Cek apakah user sudah ada
+            // Cek apakah user sudah ada di MikroTik
             $checkQuery = (new Query('/ip/hotspot/user/print'))
                 ->where('name', $no_hp);
 
@@ -95,11 +109,12 @@ class MikrotikController extends Controller
 
             return response()->json([
                 'message' => 'User added successfully with a default expiry time of 6 hours',
-            ]);
+            ], );
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
+
 
 
     public function calculateOrderDetails(array $menu_ids)
@@ -127,7 +142,7 @@ class MikrotikController extends Controller
 
     public function loginHotspotUser(Request $request)
     {
-        // Validation
+        // Validasi input
         $request->validate([
             'no_hp' => 'required|string|max:20',
             'password' => 'required|string|max:20',
@@ -137,63 +152,64 @@ class MikrotikController extends Controller
         $password = $request->input('password');
 
         try {
-            // Connect to Mikrotik
+            // Connect ke Mikrotik
             $client = $this->getClient();
 
-            // Check if user exists in MikroTik
+            // Cek apakah user sudah ada di MikroTik
             $checkQuery = (new Query('/ip/hotspot/user/print'))
                 ->where('name', $username);
 
             $existingUsers = $client->query($checkQuery)->read();
 
-            // If user not found
+            // Jika user tidak ditemukan
             if (empty($existingUsers)) {
                 return response()->json(['message' => 'User does not exist'], 404);
             }
 
-            // If user found, check password
+            // Jika user ditemukan, cek password
             $mikrotikUser = $existingUsers[0];
             if ($mikrotikUser['password'] !== $password) {
                 return response()->json(['message' => 'Invalid password'], 401);
             }
 
-            // Check if user is already active
+            // Cek apakah user sudah aktif
             if (strpos($mikrotikUser['comment'], 'Status: active') !== false) {
                 return response()->json(['message' => 'User already active. Cannot extend session.'], 403);
             }
 
-            // Get all active orders based on user's phone number
-            $activeOrders = Order::where('no_hp', $username)->get();
+            // Ambil semua order yang masih aktif berdasarkan no_hp pengguna
+            $now = Carbon::now();
+            $activeOrders = Order::where('no_hp', $username)
+                ->where('expiry_at', '>=', $now) // Hanya order yang belum kadaluarsa
+                ->get();
 
+            // Jika tidak ada order aktif
             if ($activeOrders->isEmpty()) {
                 return response()->json(['message' => 'No active order found for this user'], 400);
             }
 
-            // Calculate total expiry time from all orders
+            // Hitung total waktu kadaluarsa berdasarkan semua order aktif
             $totalExpiryMinutes = 0;
             foreach ($activeOrders as $order) {
+                // Ambil detail dari setiap menu_id dan hitung total expiry time
                 $orderDetails = $this->calculateOrderDetails([$order->menu_id]);
                 if ($orderDetails) {
                     $totalExpiryMinutes += $orderDetails->total_expiry_time;
                 }
             }
 
+            // Jika waktu kadaluarsa tidak dapat dihitung
             if ($totalExpiryMinutes <= 0) {
                 return response()->json(['message' => 'Unable to calculate expiry time'], 500);
             }
 
-            // Set expiry time based on total time from all orders
+            // Atur waktu kadaluarsa berdasarkan total waktu dari semua order
             $expiry_time = Carbon::now()->addMinutes($totalExpiryMinutes)->format('Y/m/d H:i:s');
 
-            // Update status and expiry time in MikroTik, preserving the 'name' field
-            // ... (bagian kode sebelumnya)
-
-// Update status dan waktu kadaluarsa di MikroTik, pertahankan "Name"
+            // Update status dan waktu kadaluarsa di MikroTik
             $updateQuery = (new Query('/ip/hotspot/user/set'))
-            ->equal('.id', $mikrotikUser['.id'])
-            ->equal('comment', preg_replace('/(Status: .*, Expiry: .*)/', "Status: active, Expiry: {$expiry_time}", $mikrotikUser['comment']));
-
-// ... (bagian kode selanjutnya)
+                ->equal('.id', $mikrotikUser['.id'])
+                ->equal('comment', preg_replace('/(Status: .*, Expiry: .*)/', "Status: active, Expiry: {$expiry_time}", $mikrotikUser['comment']));
 
             $client->query($updateQuery)->read();
 
@@ -207,40 +223,42 @@ class MikrotikController extends Controller
 
 
 
+    public function getHotspotUsers()
+    {
+        try {
+            $client = $this->getClient();
 
+            // Query untuk mendapatkan daftar pengguna hotspot
+            $query = new Query('/ip/hotspot/user/print');
+            $users = $client->query($query)->read();
 
+            // URL API untuk login
+            $loginUrlBase = "http://127.0.0.1:8000/api/mikrotik/login-hotspot-user"; // Endpoint API Anda
 
+            // Siapkan array untuk menyimpan user data dalam format string URL login
+            $formattedUsers = [];
 
+            foreach ($users as $user) {
+                if (isset($user['name']) && isset($user['password'])) {
+                    // Membuat URL login dengan parameter username dan password
+                    $loginUrl = $loginUrlBase . '?username=' . urlencode($user['name']) . '&password=' . urlencode($user['password']);
 
-
-public function getHotspotUsers()
-{
-    try {
-        $client = $this->getClient();
-
-        // Query untuk mendapatkan daftar pengguna hotspot
-        $query = new Query('/ip/hotspot/user/print');
-        $users = $client->query($query)->read();
-
-        // Siapkan array untuk menyimpan user data dalam format string "username:password"
-        $formattedUsers = [];
-
-        foreach ($users as $user) {
-            if (isset($user['name']) && isset($user['password'])) {
-                $formattedUsers[] = [
-                    'id' => $user['.id'],
-                    'username' => $user['name'],
-                    'password' => $user['password'],
-                    'qr_string' => $user['name'] . ':' . $user['password'] // Menggabungkan username dan password
-                ];
+                    $formattedUsers[] = [
+                        'id' => $user['.id'],
+                        'username' => $user['name'],
+                        'password' => $user['password'],
+                        'login_url' => $loginUrl, // URL login langsung untuk user ini
+                    ];
+                }
             }
-        }
 
-        return response()->json(['users' => $formattedUsers]);
-    } catch (\Exception $e) {
-        return response()->json(['error' => $e->getMessage()], 500);
+            return response()->json(['users' => $formattedUsers]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
-}
+
+
 
 public function getHotspotUsers1()
 {
@@ -257,13 +275,12 @@ public function getHotspotUsers1()
     }
 }
 
-
-
-
 public function deleteExpiredHotspotUsers()
 {
-    // Lock untuk mencegah race condition antara proses delete dan extend
-    if (Cache::lock('mikrotik_hotspot_user_operation', 10)->get()) {
+    // Ambil instance lock dan gunakan di semua tempat
+    $lock = Cache::lock('mikrotik_hotspot_user_operation', 10);
+
+    if ($lock->get()) {
         Log::info('Lock acquired for hotspot user operation');
         try {
             $client = $this->getClient();
@@ -273,51 +290,46 @@ public function deleteExpiredHotspotUsers()
             $users = $client->query($query)->read();
 
             foreach ($users as $user) {
-                // Ambil informasi waktu kadaluwarsa dari komentar
                 if (isset($user['comment']) && strpos($user['comment'], 'Expiry:') !== false) {
                     $parts = explode(', ', $user['comment']);
+                    foreach ($parts as $part) {
+                        if (strpos($part, 'Expiry:') === 0) {
+                            $expiryTimeString = trim(substr($part, strlen('Expiry: ')));
+                            try {
+                                // Ubah format ke 'Y/m/d H:i:s' sesuai dengan format di komentar
+                                $expiryTime = Carbon::createFromFormat('Y/m/d H:i:s', $expiryTimeString);
+                            } catch (\Exception $e) {
+                                Log::error("Error parsing expiry time for user {$user['.id']}: " . $e->getMessage());
+                                continue;
+                            }
 
-                    // Pastikan array parts memiliki setidaknya dua elemen untuk menghindari error
-                    if (isset($parts[1]) && strpos($parts[1], 'Expiry: ') === 0) {
-                        try {
-                            // Gunakan createFromFormat untuk parsing waktu yang lebih ketat
-                            $expiryTime = Carbon::createFromFormat('Y/m/d H:i:s', substr($parts[1], strlen('Expiry: ')));
-                        } catch (\Exception $e) {
-                            Log::error("Error parsing expiry time for user {$user['.id']}: " . $e->getMessage());
-                            continue;
+                            // Cek apakah waktu sudah kadaluarsa
+                            if (Carbon::now()->greaterThanOrEqualTo($expiryTime)) {
+                                Log::info("Deleting hotspot user {$user['.id']} with expiry time: $expiryTime");
+
+                                // Hapus pengguna jika waktu sudah habis
+                                $deleteQuery = (new Query('/ip/hotspot/user/remove'))
+                                    ->equal('.id', $user['.id']);
+                                $client->query($deleteQuery)->read();
+                                Log::info("User {$user['.id']} has been deleted.");
+                            } else {
+                                Log::info("Hotspot user {$user['.id']} is not expired yet. Expiry time: $expiryTime");
+                            }
                         }
-
-                        // Debug log untuk waktu sistem dan waktu expiry pengguna
-                        Log::info("Current time: " . Carbon::now());
-                        Log::info("User {$user['.id']} expiry time: $expiryTime");
-
-                        // Jika waktu kadaluwarsa telah tercapai, hapus pengguna terlepas dari statusnya
-                        if (Carbon::now()->greaterThanOrEqualTo($expiryTime)) {
-                            Log::info("Deleting hotspot user {$user['.id']} with expiry time: $expiryTime");
-
-                            // Hapus pengguna jika waktu telah habis
-                            $deleteQuery = (new Query('/ip/hotspot/user/remove'))
-                                ->equal('.id', $user['.id']);
-                            $client->query($deleteQuery)->read();
-                            Log::info("User {$user['.id']} has been deleted.");
-                        } else {
-                            Log::info("Hotspot user {$user['.id']} is not expired yet. Expiry time: $expiryTime");
-                        }
-                    } else {
-                        Log::warning("Expiry time not found or invalid for user {$user['.id']}");
                     }
                 } else {
                     Log::warning("No expiry information found in comment for user {$user['.id']}");
                 }
             }
 
+
             return response()->json(['message' => 'Expired hotspot users deleted successfully']);
         } catch (\Exception $e) {
             Log::error("Error deleting hotspot users: " . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);
         } finally {
-            // Release lock after operation
-            Cache::lock('mikrotik_hotspot_user_operation')->release();
+            // Release lock setelah operasi selesai
+            $lock->release(); // Ini akan menggunakan instance yang sama untuk melepaskan lock
             Log::info('Lock released after operation');
         }
     } else {
@@ -328,30 +340,29 @@ public function deleteExpiredHotspotUsers()
 
 
 
-
 public function extendHotspotUserTime(Request $request)
 {
     // Validasi input
     $request->validate([
-        'id' => 'required|string', // validasi menggunakan id
-        'additional_minutes' => 'required|integer|min:1', // menit tambahan harus integer dan minimal 1
+        'no_hp' => 'required|string|max:20', // validasi berdasarkan no_hp
+        'menu_ids' => 'required|array' // menu_ids yang digunakan untuk menambah waktu
     ]);
 
-    $id = $request->input('id');
-    $additional_minutes = $request->input('additional_minutes');
+    $no_hp = $request->input('no_hp');
+    $menu_ids = $request->input('menu_ids');
 
     try {
         $client = $this->getClient();
 
-        // Cari pengguna hotspot berdasarkan ID
-        $query = (new Query('/ip/hotspot/user/print'))->where('.id', $id);
+        // Cari pengguna hotspot berdasarkan no_hp
+        $query = (new Query('/ip/hotspot/user/print'))->where('name', $no_hp);
         $user = $client->query($query)->read();
 
         if (empty($user)) {
             return response()->json(['error' => 'User not found'], 404);
         }
 
-        // Ambil informasi komentar yang ada
+        // Ambil informasi komentar yang ada di pengguna MikroTik
         $comment = $user[0]['comment'] ?? '';
 
         // Parsing waktu kadaluarsa dari komentar
@@ -365,34 +376,58 @@ public function extendHotspotUserTime(Request $request)
                 }
             }
 
-            // Jika waktu kadaluarsa ada dan belum habis, tambahkan ke waktu tersebut
+            // Jika waktu kadaluarsa ada dan belum habis, tambahkan waktu tambahan berdasarkan menu_id
             if ($expiryTime && $expiryTime->greaterThan(Carbon::now())) {
-                $newExpiryTime = $expiryTime->addMinutes($additional_minutes)->format('Y-m-d H:i:s');
+                $newExpiryTime = $expiryTime->addMinutes($this->calculateExpiryFromMenuIds($menu_ids))->format('Y-m-d H:i:s');
             } else {
                 // Jika waktu kadaluarsa sudah lewat, mulai dari waktu sekarang
-                $newExpiryTime = Carbon::now()->addMinutes($additional_minutes)->format('Y-m-d H:i:s');
+                $newExpiryTime = Carbon::now()->addMinutes($this->calculateExpiryFromMenuIds($menu_ids))->format('Y-m-d H:i:s');
             }
         } else {
             // Jika tidak ada waktu kadaluarsa, mulai dari waktu sekarang
-            $newExpiryTime = Carbon::now()->addMinutes($additional_minutes)->format('Y-m-d H:i:s');
+            $newExpiryTime = Carbon::now()->addMinutes($this->calculateExpiryFromMenuIds($menu_ids))->format('Y-m-d H:i:s');
         }
 
-        // Update komentar dengan waktu kadaluarsa yang baru
+        // Update komentar dengan waktu kadaluarsa yang baru di MikroTik
         $newComment = strpos($comment, 'Expiry:') !== false
             ? preg_replace('/Expiry: .*/', "Expiry: $newExpiryTime", $comment)
             : ($comment ? "$comment, Expiry: $newExpiryTime" : "Expiry: $newExpiryTime");
 
         $updateQuery = (new Query('/ip/hotspot/user/set'))
-            ->equal('.id', $id)
+            ->equal('.id', $user[0]['.id'])
             ->equal('comment', $newComment);
 
-        Log::info("Updating hotspot user $id with new expiry time: $newExpiryTime");
+        Log::info("Updating hotspot user $no_hp with new expiry time: $newExpiryTime");
         $client->query($updateQuery)->read();
+
+        // Set expiry_time untuk database (2 menit)
+        $db_expiry_time = Carbon::now()->addMinutes(2)->format('Y-m-d H:i:s');
+
+        // Simpan ke tabel order setiap kali dilakukan extend
+        foreach ($menu_ids as $menu_id) {
+            Order::create([
+                'no_hp' => $no_hp,
+                'menu_id' => $menu_id,
+                'expiry_at' => $db_expiry_time // Set waktu kadaluarsa untuk order baru
+            ]);
+        }
 
         return response()->json(['message' => 'User time extended successfully']);
     } catch (\Exception $e) {
         return response()->json(['error' => $e->getMessage()], 500);
     }
+}
+
+// Fungsi untuk menghitung waktu tambahan berdasarkan menu_ids
+protected function calculateExpiryFromMenuIds(array $menu_ids)
+{
+    // Dapatkan detail dari semua menu_ids yang dikirimkan
+    $menus = Menu::whereIn('id', $menu_ids)->get();
+
+    // Hitung total waktu tambahan dari semua menu_ids
+    $totalExpiryTime = $menus->sum('expiry_time'); // Asumsikan ada field 'expiry_time' di tabel 'menus'
+
+    return $totalExpiryTime;
 }
 
 public function createOrder(Request $request)

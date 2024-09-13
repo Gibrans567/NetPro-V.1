@@ -12,7 +12,7 @@ Route::get('/user', function (Request $request) {
 Route::get('/mikrotik/connect', [MikrotikController::class, 'connectToMikrotik']);
 Route::get('/mikrotik/check-connection', [MikrotikController::class, 'checkConnection']);
 Route::post('/mikrotik/add-Hotspot-User', [MikrotikController::class, 'addHotspotUser']);
-Route::get('/mikrotik/get-Hotspot-users', [MikrotikController::class, 'getHotspotUsers']);
+Route::get('/mikrotik/get-Hotspot-User', [MikrotikController::class, 'getHotspotUsers']);
 Route::get('/mikrotik/get-Hotspot-users1', [MikrotikController::class, 'getHotspotUsers1']);
 Route::put('/login', [AuthController::class, 'login']);
 Route::delete('/mikrotik/deleteExpiredHotspotUsers', [MikrotikController::class, 'deleteExpiredHotspotUsers']);
