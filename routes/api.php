@@ -18,3 +18,10 @@ Route::put('/login', [AuthController::class, 'login']);
 Route::delete('/mikrotik/deleteExpiredHotspotUsers', [MikrotikController::class, 'deleteExpiredHotspotUsers']);
 Route::put('/mikrotik/extend-Hotspot', [MikrotikController::class, 'extendHotspotUserTime']);
 Route::put('/mikrotik/login-hotspot-user', [MikrotikController::class, 'loginHotspotUser']);
+
+Route::get('/mikrotik/get-Hotspot-by-phone/{no_hp}', [MikrotikController::class, 'getHotspotUserByPhoneNumber']);
+
+Route::post('/mikrotik/add', [MikrotikController::class, 'addMenu']);
+Route::put('/mikrotik/edit/{id}', [MikrotikController::class, 'editMenu']);
+
+Route::get('/mikrotik/get-all-menu', [MikrotikController::class, 'getAllMenus']);
