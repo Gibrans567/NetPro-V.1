@@ -25,3 +25,4 @@ Route::post('/mikrotik/add', [MikrotikController::class, 'addMenu']);
 Route::put('/mikrotik/edit/{id}', [MikrotikController::class, 'editMenu']);
 
 Route::get('/mikrotik/get-all-menu', [MikrotikController::class, 'getAllMenus']);
+Route::get('/mikrotik/get-all-order', [MikrotikController::class, 'getAllOrders']);

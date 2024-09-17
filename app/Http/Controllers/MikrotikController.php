@@ -575,5 +575,22 @@ public function getAllMenus()
     }
 }
 
+public function getAllOrders()
+{
+    try {
+        // Retrieve all orders from the database
+        $orders = Order::all();
+
+        // Check if there are orders
+        if ($orders->isEmpty()) {
+            return response()->json(['message' => 'No orders found'], 404);
+        }
+
+        return response()->json(['orders' => $orders]);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+}
+
 
 }
