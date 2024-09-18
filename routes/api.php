@@ -23,6 +23,9 @@ Route::get('/mikrotik/get-Hotspot-by-phone/{no_hp}', [MikrotikController::class,
 
 Route::post('/mikrotik/add', [MikrotikController::class, 'addMenu']);
 Route::put('/mikrotik/edit/{id}', [MikrotikController::class, 'editMenu']);
+Route::post('/mikrotik/add-Hotspot-Limitasi', [MikrotikController::class, 'addHotspotUser1']);
 
 Route::get('/mikrotik/get-all-menu', [MikrotikController::class, 'getAllMenus']);
 Route::get('/mikrotik/get-all-order', [MikrotikController::class, 'getAllOrders']);
+Route::get('/mikrotik/get-exist-user', [MikrotikController::class, 'checkUserExists']);
+Route::match(['post', 'put'], '/mikrotik/manage-hotspot-user', [MikrotikController::class, 'manageHotspotUser']);

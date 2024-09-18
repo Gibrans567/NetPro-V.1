@@ -8,6 +8,7 @@
         "php": "^8.2",
         "endroid/qr-code": "^5.0",
         "evilfreelancer/routeros-api-php": "^1.5",
+        "guzzlehttp/guzzle": "^7.9",
         "laravel/framework": "^11.9",
         "laravel/reverb": "^1.0",
         "laravel/sanctum": "^4.0",
