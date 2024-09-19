@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 
 class MikrotikController extends Controller
 {
+    
     protected function getClient()
 {
     $config = [
@@ -43,74 +44,6 @@ class MikrotikController extends Controller
         try {
             $client = $this->getClient();
             return response()->json(['message' => 'Connection to Mikrotik successful']);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
-        }
-    }
-
-    public function addHotspotUser2(Request $request)
-    {
-        // Validasi input
-        $request->validate([
-            'no_hp' => 'required|string|max:20',
-            'name' => 'required|string|max:255',
-            'menu_ids' => 'required|array' // ID menu yang dipesan
-        ]);
-
-        $no_hp = $request->input('no_hp');
-        $name = $request->input('name');
-        $menu_ids = $request->input('menu_ids');
-
-        // Cek order lama yang sudah kadaluarsa berdasarkan no_hp
-        $now = Carbon::now();
-        $expiredOrders = Order::where('no_hp', $no_hp)
-            ->where('expiry_at', '<', $now) // Order yang sudah kadaluarsa
-            ->get();
-
-        // Hapus semua order yang sudah kadaluarsa
-        foreach ($expiredOrders as $expiredOrder) {
-            $expiredOrder->delete();
-        }
-
-         // Set expiry_time untuk database (2 menit)
-        $db_expiry_time = Carbon::now()->addMinutes(2)->format('Y-m-d H:i:s');
-
-        // Simpan pesanan baru dan hitung waktu expiry baru
-        $expiry_time = Carbon::now()->addMinutes(1)->format('Y/m/d H:i:s'); // Waktu expiry tetap 6 jam
-
-        foreach ($menu_ids as $menu_id) {
-            Order::create([
-                'no_hp' => $no_hp,
-                'menu_id' => $menu_id,
-                'expiry_at' => $db_expiry_time // Set waktu kadaluarsa untuk order baru
-            ]);
-        }
-
-        try {
-            $client = $this->getClient();
-
-            // Cek apakah user sudah ada di MikroTik
-            $checkQuery = (new Query('/ip/hotspot/user/print'))
-                ->where('name', $no_hp);
-
-            $existingUsers = $client->query($checkQuery)->read();
-
-            if (!empty($existingUsers)) {
-                return response()->json(['message' => 'User already exists'], 409);
-            }
-
-            // Tambahkan user baru dengan waktu kadaluarsa 6 jam
-            $query = (new Query('/ip/hotspot/user/add'))
-                ->equal('name', $no_hp)
-                ->equal('password', $no_hp)
-                ->equal('profile', 'default')
-                ->equal('comment', "Name: {$name}, Status: inactive, Expiry: {$expiry_time}");
-
-            $client->query($query)->read();
-
-            return response()->json([
-                'message' => 'User added successfully with a default expiry time of 6 hours',
-            ], );
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -318,9 +251,6 @@ class MikrotikController extends Controller
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
-
-
-
 
 
     public function deleteExpiredHotspotUsers()
@@ -609,10 +539,12 @@ public function addHotspotUser(Request $request)
     // Validasi input
     $request->validate([
         'no_hp' => 'required|string|max:20',
-        'name' => 'sometimes|required|string|max:255', // Optional jika extend
-        'menu_ids' => 'required|array'
+        'name' => 'sometimes|required|string|max:255',
+        'menu_ids' => 'required|array',
+        'profile' => 'nullable|string|max:50' // Membuat profile nullable
     ]);
 
+    $profile = $request->input('profile', 'customer'); // Gunakan 'customer' sebagai default jika tidak ada input
     $no_hp = $request->input('no_hp');
     $menu_ids = $request->input('menu_ids');
     $name = $request->input('name', null); // Optional untuk extend
@@ -689,7 +621,7 @@ public function addHotspotUser(Request $request)
             $addUserQuery = (new Query('/ip/hotspot/user/add'))
                 ->equal('name', $no_hp)
                 ->equal('password', $no_hp)
-                ->equal('profile', 'default')
+                ->equal('profile', $profile)
                 ->equal('comment', "Name: {$name}, Status: inactive, Expiry: {$expiry_time}");
 
             $client->query($addUserQuery)->read();
