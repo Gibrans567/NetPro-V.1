@@ -28,4 +28,8 @@ Route::post('/mikrotik/add-Hotspot-Limitasi', [MikrotikController::class, 'addHo
 Route::get('/mikrotik/get-all-menu', [MikrotikController::class, 'getAllMenus']);
 Route::get('/mikrotik/get-all-order', [MikrotikController::class, 'getAllOrders']);
 Route::get('/mikrotik/get-exist-user', [MikrotikController::class, 'checkUserExists']);
-Route::match(['post', 'put'], '/mikrotik/manage-hotspot-user', [MikrotikController::class, 'manageHotspotUser']);
+Route::match(['post', 'put'], '/mikrotik/add-Hotspot-User', [MikrotikController::class, 'addHotspotUser']);
+
+Route::get('/mikrotik/get-profile', [MikrotikController::class, 'getHotspotProfile']);
+Route::post('/mikrotik/set-profile', [MikrotikController::class, 'setHotspotProfile']);
+Route::delete('/mikrotik/delete-profile', [MikrotikController::class, 'deleteHotspotProfile']);

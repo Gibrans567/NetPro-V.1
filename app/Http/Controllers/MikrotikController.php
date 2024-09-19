@@ -14,46 +14,28 @@ use Illuminate\Support\Facades\Log;
 class MikrotikController extends Controller
 {
     protected function getClient()
-    {
-        $config = [
-            'host' => '192.168.6.21',  // Ganti dengan IP Mikrotik kamu
-            'user' => 'admin',         // Ganti dengan username Mikrotik kamu
-            'pass' => 'admin2',        // Ganti dengan password Mikrotik kamu
-            'port' => 8728,            // Port API Mikrotik (default 8728)
-        ];
+{
+    $config = [
+        'host' => 'id-4.hostddns.us',  // Ganti dengan domain DDNS kamu
+        'user' => 'admin',             // Username Mikrotik
+        'pass' => 'admin2',            // Password Mikrotik
+        'port' => 21326,                // Port API Mikrotik (default 8728)
+    ];
 
-        return new Client($config);
-    }
+    return new Client($config);
+}
 
     public function connectToMikrotik()
-{
-    $url = 'http://192.168.6.21/api/interface/print'; // Ganti dengan URL Mikrotik API
-    $username = 'admin'; // Username Mikrotik
-    $password = 'admin2'; // Password Mikrotik
-
-    // Inisiasi cURL
-    $ch = curl_init();
-
-    // Atur opsi cURL
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_USERPWD, "$username:$password"); // Autentikasi basic
-    curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-
-    // Eksekusi request dan dapatkan respons
-    $output = curl_exec($ch);
-
-    // Tangani error jika ada
-    if (curl_errno($ch)) {
-        return response()->json(['error' => curl_error($ch)], 500);
+    {
+        try {
+            $client = $this->getClient();
+            $query = new Query('/interface/print');
+            $response = $client->query($query)->read();
+            return response()->json($response);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
-
-    // Tutup koneksi cURL
-    curl_close($ch);
-
-    // Kembalikan hasil
-    return response()->json(json_decode($output, true));
-}
 
 
     public function checkConnection()
@@ -66,7 +48,7 @@ class MikrotikController extends Controller
         }
     }
 
-    public function addHotspotUser(Request $request)
+    public function addHotspotUser2(Request $request)
     {
         // Validasi input
         $request->validate([
@@ -133,77 +115,6 @@ class MikrotikController extends Controller
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
-
-    public function addHotspotUser1(Request $request)
-    {
-        // Validasi input
-        $request->validate([
-            'no_hp' => 'required|string|max:20',
-            'name' => 'required|string|max:255',
-            'menu_ids' => 'required|array' // ID menu yang dipesan
-        ]);
-
-        $no_hp = $request->input('no_hp');
-        $name = $request->input('name');
-        $menu_ids = $request->input('menu_ids');
-
-        // Cek order lama yang sudah kadaluarsa berdasarkan no_hp
-        $now = Carbon::now();
-        $expiredOrders = Order::where('no_hp', $no_hp)
-            ->where('expiry_at', '<', $now) // Order yang sudah kadaluarsa
-            ->get();
-
-        // Hapus semua order yang sudah kadaluarsa
-        foreach ($expiredOrders as $expiredOrder) {
-            $expiredOrder->delete();
-        }
-
-        // Set expiry_time untuk database (2 menit)
-        $db_expiry_time = Carbon::now()->addMinutes(2)->format('Y-m-d H:i:s');
-
-        // Simpan pesanan baru dan hitung waktu expiry baru
-        $expiry_time = Carbon::now()->addMinutes(1)->format('Y/m/d H:i:s'); // Waktu expiry tetap 6 jam
-
-        foreach ($menu_ids as $menu_id) {
-            Order::create([
-                'no_hp' => $no_hp,
-                'menu_id' => $menu_id,
-                'expiry_at' => $db_expiry_time // Set waktu kadaluarsa untuk order baru
-            ]);
-        }
-
-        try {
-            $client = $this->getClient();
-
-            // Cek apakah user sudah ada di MikroTik
-            $checkQuery = (new Query('/ip/hotspot/user/print'))
-                ->where('name', $no_hp);
-
-            $existingUsers = $client->query($checkQuery)->read();
-
-            if (!empty($existingUsers)) {
-                return response()->json(['message' => 'User already exists'], 409);
-            }
-
-            // Tambahkan user baru dengan waktu kadaluarsa 6 jam dan rate-limit 10M/10M
-            $query = (new Query('/ip/hotspot/user/add'))
-                ->equal('name', $no_hp)
-                ->equal('password', $no_hp)
-                ->equal('profile', 'default')
-                ->equal('comment', "Name: {$name}, Status: inactive, Expiry: {$expiry_time}")
-                ->equal('rate-limit', '10M/10M'); // Batasi kecepatan internet menjadi 10 Mbps
-
-            // Jalankan query untuk menambahkan user di Mikrotik
-            $client->query($query)->read();
-
-            return response()->json([
-                'message' => 'User added successfully with a default expiry time of 6 hours and 10 Mbps rate limit',
-            ]);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
-        }
-    }
-
 
     public function calculateOrderDetails(array $menu_ids)
     {
@@ -412,68 +323,48 @@ class MikrotikController extends Controller
 
 
 
-public function deleteExpiredHotspotUsers()
-{
-    // Ambil instance lock dan gunakan di semua tempat
-    $lock = Cache::lock('mikrotik_hotspot_user_operation', 10);
+    public function deleteExpiredHotspotUsers()
+    {
+        $lock = Cache::lock('mikrotik_hotspot_user_operation', 10);
 
-    if ($lock->get()) {
-        Log::info('Lock acquired for hotspot user operation');
-        try {
-            $client = $this->getClient();
+        if ($lock->get()) {
+            try {
+                $client = $this->getClient();
+                $query = new Query('/ip/hotspot/user/print');
+                $users = $client->query($query)->read();
 
-            // Query untuk mendapatkan daftar pengguna hotspot
-            $query = new Query('/ip/hotspot/user/print');
-            $users = $client->query($query)->read();
+                foreach ($users as $user) {
+                    if (isset($user['comment']) && preg_match('/Expiry: ([0-9\/\:\s]+)/', $user['comment'], $matches)) {
+                        try {
+                            // Try to parse expiry date more flexibly
+                            $expiryTime = Carbon::parse($matches[1]);
 
-            foreach ($users as $user) {
-                if (isset($user['comment']) && strpos($user['comment'], 'Expiry:') !== false) {
-                    $parts = explode(', ', $user['comment']);
-                    foreach ($parts as $part) {
-                        if (strpos($part, 'Expiry:') === 0) {
-                            $expiryTimeString = trim(substr($part, strlen('Expiry: ')));
-                            try {
-                                // Ubah format ke 'Y/m/d H:i:s' sesuai dengan format di komentar
-                                $expiryTime = Carbon::createFromFormat('Y/m/d H:i:s', $expiryTimeString);
-                            } catch (\Exception $e) {
-                                Log::error("Error parsing expiry time for user {$user['.id']}: " . $e->getMessage());
-                                continue;
-                            }
-
-                            // Cek apakah waktu sudah kadaluarsa
+                            // If the current time is past the expiry time, delete the user
                             if (Carbon::now()->greaterThanOrEqualTo($expiryTime)) {
-                                Log::info("Deleting hotspot user {$user['.id']} with expiry time: $expiryTime");
-
-                                // Hapus pengguna jika waktu sudah habis
-                                $deleteQuery = (new Query('/ip/hotspot/user/remove'))
-                                    ->equal('.id', $user['.id']);
+                                $deleteQuery = (new Query('/ip/hotspot/user/remove'))->equal('.id', $user['.id']);
                                 $client->query($deleteQuery)->read();
-                                Log::info("User {$user['.id']} has been deleted.");
-                            } else {
-                                Log::info("Hotspot user {$user['.id']} is not expired yet. Expiry time: $expiryTime");
                             }
+                        } catch (\Exception $e) {
+                            // If the date format is invalid, skip this user
+                            continue;
                         }
                     }
-                } else {
-                    Log::warning("No expiry information found in comment for user {$user['.id']}");
                 }
+
+                return response()->json(['message' => 'Expired hotspot users deleted successfully']);
+            } catch (\Exception $e) {
+                return response()->json(['error' => $e->getMessage()], 500);
+            } finally {
+                $lock->release();
             }
-
-
-            return response()->json(['message' => 'Expired hotspot users deleted successfully']);
-        } catch (\Exception $e) {
-            Log::error("Error deleting hotspot users: " . $e->getMessage());
-            return response()->json(['error' => $e->getMessage()], 500);
-        } finally {
-            // Release lock setelah operasi selesai
-            $lock->release(); // Ini akan menggunakan instance yang sama untuk melepaskan lock
-            Log::info('Lock released after operation');
+        } else {
+            return response()->json(['message' => 'Another hotspot user operation is in progress'], 429);
         }
-    } else {
-        Log::warning('Another hotspot user operation is in progress, skipping this run.');
-        return response()->json(['message' => 'Another hotspot user operation is in progress'], 429);
     }
-}
+
+
+
+
 
 public function extendHotspotUserTime(Request $request)
 {
@@ -713,7 +604,7 @@ public function checkUserExists(Request $request)
     }
 }
 
-public function manageHotspotUser(Request $request)
+public function addHotspotUser(Request $request)
 {
     // Validasi input
     $request->validate([
@@ -780,7 +671,7 @@ public function manageHotspotUser(Request $request)
                     Order::create([
                         'no_hp' => $no_hp,
                         'menu_id' => $menu_id,
-                        'expiry_at' => Carbon::now()->addMinutes(2)->format('Y-m-d H:i:s')
+                        'expiry_at' => Carbon::now()->addMinutes(10)->format('Y-m-d H:i:s')
                     ]);
                 }
             }
@@ -792,7 +683,7 @@ public function manageHotspotUser(Request $request)
 
         } else {
             // Jika user belum ada, tambahkan user baru (logika POST)
-            $expiry_time = Carbon::now()->addHours(6)->format('Y/m/d H:i:s'); // Expiry time 6 jam
+            $expiry_time = Carbon::now()->addMinutes(value: 30)->format('Y/m/d H:i:s'); // Expiry time 6 jam
 
             // Tambahkan user baru di MikroTik
             $addUserQuery = (new Query('/ip/hotspot/user/add'))
@@ -820,7 +711,167 @@ public function manageHotspotUser(Request $request)
     }
 }
 
+public function setHotspotProfile(Request $request)
+    {
+        // Validasi input
+        $request->validate([
+            'profile_name' => 'required|string|max:255', // Nama profil
+            'shared_users' => 'required|integer|min:1',  // Jumlah shared users
+            'rate_limit' => 'required|string',           // Batas kecepatan (rx/tx)
+        ]);
 
+        // Ambil data dari request
+        $profile_name = $request->input('profile_name');
+        $shared_users = $request->input('shared_users');
+        $rate_limit = $request->input('rate_limit');
 
+        try {
+            // Membuat koneksi ke MikroTik
+            $client = $this->getClient();
+
+            // Cek apakah profil sudah ada
+            $checkQuery = (new Query('/ip/hotspot/user/profile/print'))
+                ->where('name', $profile_name);
+
+            $existingProfiles = $client->query($checkQuery)->read();
+
+            if (!empty($existingProfiles)) {
+                // Profil sudah ada, update data
+                $updateQuery = (new Query('/ip/hotspot/user/profile/set'))
+                    ->equal('.id', $existingProfiles[0]['.id']) // Update berdasarkan ID profil
+                    ->equal('name', $profile_name)
+                    ->equal('shared-users', $shared_users)
+                    ->equal('rate-limit', $rate_limit);
+
+                $client->query($updateQuery)->read();
+
+                return response()->json(['message' => 'Hotspot profile updated successfully'], 200);
+            } else {
+                // Jika profil belum ada, tambahkan profil baru
+                $addQuery = (new Query('/ip/hotspot/user/profile/add'))
+                    ->equal('name', $profile_name)
+                    ->equal('shared-users', $shared_users)
+                    ->equal('rate-limit', $rate_limit)
+                    ->equal('keepalive-timeout', 'none'); // Set Keepalive Timeout menjadi unlimited (none)
+
+                $client->query($addQuery)->read();
+
+                return response()->json(['message' => 'Hotspot profile created successfully'], 201);
+            }
+        } catch (\Exception $e) {
+            // Tangani error jika ada
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+public function getHotspotProfile(Request $request)
+{
+    try {
+        // Koneksi ke MikroTik
+        $client = $this->getClient();
+
+        // Query untuk mendapatkan semua profil Hotspot
+        $query = new Query('/ip/hotspot/user/profile/print');
+
+        // Eksekusi query
+        $profiles = $client->query($query)->read();
+
+        // Jika profil ditemukan, kita ambil informasi Shared Users dan Rate Limit
+        if (!empty($profiles)) {
+            $result = [];
+
+            // Loop melalui setiap profil dan ambil data penting
+            foreach ($profiles as $profile) {
+                $result[] = [
+                    'profile_name' => $profile['name'],
+                    'shared_users' => $profile['shared-users'] ?? 'Not set',
+                    'rate_limit' => $profile['rate-limit'] ?? 'Not set',
+                ];
+            }
+
+            // Kembalikan hasil sebagai response JSON
+            return response()->json($result, 200);
+        } else {
+            // Jika tidak ada profil ditemukan
+            return response()->json(['message' => 'No profiles found'], 404);
+        }
+    } catch (\Exception $e) {
+        // Tangani error jika ada
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+}
+
+public function deleteHotspotProfile(Request $request)
+    {
+        // Validasi input
+        $request->validate([
+            'profile_name' => 'required|string', // Nama profil yang ingin dihapus
+        ]);
+
+        $profile_name = $request->input('profile_name');
+
+        try {
+            // Koneksi ke MikroTik
+            $client = $this->getClient();
+
+            // Query untuk mencari profil berdasarkan nama
+            $checkQuery = (new Query('/ip/hotspot/user/profile/print'))
+                ->where('name', $profile_name);
+
+            // Eksekusi query untuk mencari profil
+            $profiles = $client->query($checkQuery)->read();
+
+            // Jika profil ditemukan
+            if (!empty($profiles)) {
+                $profile_id = $profiles[0]['.id']; // Ambil ID profil
+
+                // Query untuk menghapus profil berdasarkan ID
+                $deleteQuery = (new Query('/ip/hotspot/user/profile/remove'))
+                    ->equal('.id', $profile_id);
+
+                // Eksekusi query untuk menghapus profil
+                $client->query($deleteQuery)->read();
+
+                // Kembalikan pesan sukses
+                return response()->json(['message' => 'Hotspot profile deleted successfully'], 200);
+            } else {
+                // Jika profil tidak ditemukan
+                return response()->json(['message' => 'Profile not found'], 404);
+            }
+        } catch (\Exception $e) {
+            // Tangani error jika ada
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    // Fungsi untuk memblokir situs web
+    public function blockWebsite(Request $request)
+    {
+        // Validasi input
+        $request->validate([
+            'domain' => 'required|string|max:255', // Domain yang akan diblokir
+        ]);
+
+        $domain = $request->input('domain');
+
+        try {
+            // Koneksi ke MikroTik
+            $client = $this->getClient();
+
+            // Query untuk menambahkan rule firewall untuk memblokir domain
+            $addQuery = (new Query('/ip/firewall/address-list/add'))
+                ->equal('list', 'blocked_sites') // Nama daftar alamat
+                ->equal('address', $domain)       // Alamat yang akan diblokir
+                ->equal('comment', 'Blocked website'); // Komentar untuk aturan
+
+            // Eksekusi query
+            $client->query($addQuery)->read();
+
+            return response()->json(['message' => 'Website blocked successfully'], 200);
+        } catch (\Exception $e) {
+            // Tangani error jika ada
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
 
 }
