@@ -2,8 +2,10 @@
 use App\Http\Controllers\MikrotikController;
 use Illuminate\Support\Facades\Route;
 
+
+
 Route::get('/', function () {
-    return view('welcome');
+    return response()->json(['message' => 'Bismillah bib!']);
 });
 
 
